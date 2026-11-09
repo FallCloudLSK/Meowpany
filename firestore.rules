@@ -1,0 +1,132 @@
+rules_version = '2';
+
+// 喵咪系列（Meowporation）共用的 Firestore 規則。
+//
+// players/{uid}                      玩家資料（暱稱、頭像編號），本人讀寫
+// players/{uid}/saves/{gameId}       各遊戲雲端存檔，本人讀寫
+// boards/{gameId}/progress/{uid}     ② 目前通關進度
+// boards/{gameId}/days/{day}/speed/{uid}  ① 今日關卡通關速度（day = 台灣日期 yyyymmdd）
+// boards/{gameId}/days/{day}/count/{uid}  ③ 今日通關數量
+// admins/{uid}                       管理員名單（只能在主控台手動新增）
+//
+// 「今天」一律用伺服器時間換算台灣時間（UTC+8），改手機時鐘沒有用。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isMe(uid) { return signedIn() && request.auth.uid == uid; }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function gameOk(gameId) { return gameId in ['meowatt', 'travel']; }
+
+    // 台灣今天的 yyyymmdd 整數
+    function taipeiDay() {
+      let t = request.time + duration.value(8, 'h');
+      return t.year() * 10000 + t.month() * 100 + t.day();
+    }
+
+    function nameOk(d) {
+      return d.name is string && d.name.size() >= 1 && d.name.size() <= 16
+        && d.avatar is int && d.avatar >= 0 && d.avatar < 100;
+    }
+
+    // 距離上次寫入經過的毫秒數
+    function elapsedMs() {
+      return request.time.toMillis() - resource.data.at.toMillis();
+    }
+
+    // 增加量不能超過「1 + 經過秒數 / 3」（每 3 秒最多過一關），也不能倒退
+    function growsReasonably(field) {
+      let inc = request.resource.data[field] - resource.data[field];
+      return inc >= 0 && inc <= 1 + elapsedMs() / 3000;
+    }
+
+    match /admins/{uid} {
+      allow read: if isMe(uid);
+      allow write: if false;
+    }
+
+    match /players/{uid} {
+      allow read: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['name', 'avatar', 'createdAt', 'updatedAt'])
+        && nameOk(request.resource.data);
+      allow delete: if isMe(uid);
+
+      match /saves/{saveId} {
+        // saveId = gameId 或 gameId_backup
+        allow read, delete: if isMe(uid);
+        allow create, update: if isMe(uid)
+          && request.resource.data.keys().hasOnly(['data', 'cleared', 'device', 'saveVersion', 'at'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() < 800000
+          && request.resource.data.cleared is int
+          && request.resource.data.at == request.time;
+      }
+    }
+
+    match /boards/{gameId} {
+
+      match /progress/{uid} {
+        allow read: if true;
+        allow create: if isMe(uid) && gameOk(gameId)
+          && request.resource.data.keys().hasOnly(['name', 'avatar', 'cleared', 'at'])
+          && nameOk(request.resource.data)
+          && request.resource.data.cleared is int
+          && request.resource.data.cleared >= 0
+          && request.resource.data.cleared <= 2000
+          && request.resource.data.at == request.time;
+        allow update: if isMe(uid)
+          && request.resource.data.keys().hasOnly(['name', 'avatar', 'cleared', 'at'])
+          && nameOk(request.resource.data)
+          && request.resource.data.cleared is int
+          && growsReasonably('cleared')
+          && request.resource.data.at == request.time;
+        allow delete: if isMe(uid) || isAdmin();
+      }
+
+      match /days/{day} {
+
+        match /speed/{uid} {
+          allow read: if true;
+          // 一天只能寫一次（只算當天第一次通關）
+          allow create: if isMe(uid) && gameOk(gameId)
+            && day == string(taipeiDay())
+            && request.resource.data.keys().hasOnly(['name', 'avatar', 'ms', 'hints', 'level', 'at'])
+            && nameOk(request.resource.data)
+            && request.resource.data.ms is int
+            && request.resource.data.ms >= 3000
+            && request.resource.data.ms <= 86400000
+            && request.resource.data.hints is int
+            && request.resource.data.hints >= 0
+            && request.resource.data.hints <= 99
+            && request.resource.data.level is string
+            && request.resource.data.at == request.time;
+          allow update: if false;
+          allow delete: if isAdmin();
+        }
+
+        match /count/{uid} {
+          allow read: if true;
+          allow create: if isMe(uid) && gameOk(gameId)
+            && day == string(taipeiDay())
+            && request.resource.data.keys().hasOnly(['name', 'avatar', 'count', 'at'])
+            && nameOk(request.resource.data)
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.count <= 10
+            && request.resource.data.at == request.time;
+          allow update: if isMe(uid)
+            && day == string(taipeiDay())
+            && request.resource.data.keys().hasOnly(['name', 'avatar', 'count', 'at'])
+            && nameOk(request.resource.data)
+            && request.resource.data.count is int
+            && growsReasonably('count')
+            && request.resource.data.at == request.time;
+          allow delete: if isAdmin();
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+# 喵咪系列：把 Firestore 規則與索引部署到 Firebase 專案（Spark 免費方案）
+# 遊戲本身仍由 GitHub Pages（main 分支根目錄）提供，不經過這裡。
+#
+# 需要的設定（GitHub 倉庫 Settings → Secrets and variables → Actions）：
+#   Secret   FIREBASE_SERVICE_ACCOUNT  服務帳戶 JSON 金鑰
+#            （角色：Firebase Rules 管理員 + Cloud Datastore 索引管理員）
+#   Variable FIREBASE_PROJECT_ID       Firebase 專案 ID
+# 還沒設定時會略過部署，不會失敗。PR 只在模擬器跑 tests/ 的規則測試（不需要金鑰）。
+name: Firestore rules
+
+on:
+  push:
+    branches: [main]
+    paths: [firestore.rules, firestore.indexes.json, firebase.json, tests/**, .github/workflows/deploy.yml]
+  pull_request:
+    paths: [firestore.rules, firestore.indexes.json, firebase.json, tests/**, .github/workflows/deploy.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firestore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: 用模擬器跑規則測試
+        working-directory: tests
+        run: |
+          npm ci
+          npm test
+
+      - name: 部署規則與索引（main）
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$SA" ] || [ -z "$PROJECT" ]; then
+            echo "::warning::尚未設定 FIREBASE_SERVICE_ACCOUNT 或 FIREBASE_PROJECT_ID，略過部署"
+            exit 0
+          fi
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx --prefix tests firebase deploy --only firestore --project "$PROJECT" --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
