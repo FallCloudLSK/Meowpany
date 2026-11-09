@@ -1,0 +1,98 @@
+# 喵咪系列自動部署
+# - hosting/ → Firebase Hosting（main 正式上線；PR 產生 7 天有效的預覽網址）
+# - firestore.rules / firestore.indexes.json → Firestore（只在 main）
+# - pages/ → GitHub Pages 舊網址轉址頁（只在 main）
+#
+# 需要的設定（GitHub 倉庫 Settings → Secrets and variables → Actions）：
+#   Secret   FIREBASE_SERVICE_ACCOUNT  服務帳戶 JSON 金鑰（角色：Firebase 管理員）
+#   Variable FIREBASE_PROJECT_ID       Firebase 專案 ID（沒設就用 .firebaserc 的 default）
+# 還沒放金鑰時，Firebase 相關步驟會自動略過，不會失敗。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  firebase:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 檢查 Firebase 設定
+        id: cfg
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PROJECT_VAR: ${{ vars.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "has_sa=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::尚未設定 FIREBASE_SERVICE_ACCOUNT，略過 Firebase 部署"
+          else
+            echo "has_sa=true" >> "$GITHUB_OUTPUT"
+          fi
+          project="$PROJECT_VAR"
+          if [ -z "$project" ]; then
+            project=$(python3 -c "import json;print(json.load(open('.firebaserc'))['projects']['default'])")
+          fi
+          echo "project=$project" >> "$GITHUB_OUTPUT"
+
+      - name: 部署預覽版（PR）
+        if: steps.cfg.outputs.has_sa == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ steps.cfg.outputs.project }}
+          expires: 7d
+
+      - name: 部署正式版 Hosting（main）
+        if: steps.cfg.outputs.has_sa == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ steps.cfg.outputs.project }}
+          channelId: live
+
+      - name: 部署 Firestore 規則與索引（main）
+        if: steps.cfg.outputs.has_sa == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx --yes firebase-tools@14 deploy --only firestore --project "${{ steps.cfg.outputs.project }}" --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
+
+  pages:
+    # 舊網址 https://fallcloudlsk.github.io/Meowpany/ 只剩轉址頁
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+      - id: deployment
+        uses: actions/deploy-pages@v4

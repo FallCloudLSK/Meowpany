@@ -1,0 +1,26 @@
+{
+  "hosting": {
+    "public": "hosting",
+    "cleanUrls": false,
+    "trailingSlash": true,
+    "ignore": ["**/.*"],
+    "headers": [
+      {
+        "source": "**/*.@(html|js|json|wasm|pck)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "**/*.@(png|svg|ico|ogg|woff2)",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
+      },
+      {
+        "source": "**/*.wasm",
+        "headers": [{ "key": "Content-Type", "value": "application/wasm" }]
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>喵咪系列搬家了</title>
+<script src="/Meowpany/migrate.js"></script>
+<script>
+  // 其他舊路徑：去掉 /Meowpany 前綴後轉到新網址同一路徑
+  var rest = location.pathname.replace(/^\/Meowpany/i, '') || '/';
+  location.replace(MeowMigrate.NEW_ORIGIN + rest + location.search + location.hash);
+</script>
+</head>
+<body style="background:#fff5e3;color:#4a3426;text-align:center;padding:48px 16px;font-size:1.4rem;font-family:sans-serif">
+  <p>🐱 喵咪系列搬家了！正在帶你去新家…</p>
+</body>
+</html>
