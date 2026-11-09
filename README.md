@@ -10,6 +10,8 @@
 
 ## Firebase
 
+- `shared/meow-cloud.js`：各遊戲共用的雲端模組（Google 登入、雲端存檔、排行榜）。Godot 匯出設定的 `head_include` 會載入它，遊戲用 `JavaScriptBridge` 呼叫。網址加 `?emu=1` 會改連本機模擬器。
+
 - `firestore.rules`：玩家資料、雲端存檔、三種排行榜的資料庫規則（說明在檔案開頭）。
 - `firestore.indexes.json`：排行榜排序用的索引。
 - `.github/workflows/deploy.yml`：改到上面兩個檔案並推到 main 時，自動部署到 Firebase。
