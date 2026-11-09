@@ -52,5 +52,6 @@ jobs:
           fi
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          node tests/check-credentials.mjs "$PROJECT"
           npx --prefix tests firebase deploy --only firestore --project "$PROJECT" --non-interactive
-          rm -f "$RUNNER_TEMP/sa.json"
