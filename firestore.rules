@@ -36,6 +36,13 @@ service cloud.firestore {
       return request.time.toMillis() - resource.data.at.toMillis();
     }
 
+    // 只改暱稱、頭像（改名後同步排行榜上的名字）
+    function renameOnly(uid) {
+      return isMe(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'avatar'])
+        && nameOk(request.resource.data);
+    }
+
     // 增加量不能超過「1 + 經過秒數 / 3」（每 3 秒最多過一關），也不能倒退
     function growsReasonably(field) {
       let inc = request.resource.data[field] - resource.data[field];
@@ -82,7 +89,8 @@ service cloud.firestore {
           && nameOk(request.resource.data)
           && request.resource.data.cleared is int
           && growsReasonably('cleared')
-          && request.resource.data.at == request.time;
+          && request.resource.data.at == request.time
+          || renameOnly(uid);
         allow delete: if isMe(uid) || isAdmin();
       }
 
@@ -90,7 +98,7 @@ service cloud.firestore {
 
         match /speed/{uid} {
           allow read: if true;
-          // 一天只能寫一次（只算當天第一次通關）
+          // 一天只能寫一次（只算當天第一次通關）；之後只能改暱稱、頭像
           allow create: if isMe(uid) && gameOk(gameId)
             && day == string(taipeiDay())
             && request.resource.data.keys().hasOnly(['name', 'avatar', 'ms', 'hints', 'level', 'at'])
@@ -103,7 +111,7 @@ service cloud.firestore {
             && request.resource.data.hints <= 99
             && request.resource.data.level is string
             && request.resource.data.at == request.time;
-          allow update: if false;
+          allow update: if renameOnly(uid);
           allow delete: if isAdmin();
         }
 
@@ -123,7 +131,8 @@ service cloud.firestore {
             && nameOk(request.resource.data)
             && request.resource.data.count is int
             && growsReasonably('count')
-            && request.resource.data.at == request.time;
+            && request.resource.data.at == request.time
+            || renameOnly(uid);
           allow delete: if isAdmin();
         }
       }

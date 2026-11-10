@@ -28,6 +28,12 @@ await chk('speed client time', setDoc(doc(b,`boards/meowatt/days/${day}/speed/bo
 await chk('count create', setDoc(doc(a,`boards/meowatt/days/${day}/count/alice`),{...base,count:1,at:serverTimestamp()}), true);
 await chk('count +1', updateDoc(doc(a,`boards/meowatt/days/${day}/count/alice`),{count:2,at:serverTimestamp()}), true);
 await chk('count +99', updateDoc(doc(a,`boards/meowatt/days/${day}/count/alice`),{count:101,at:serverTimestamp()}), false);
+await chk('speed rename', updateDoc(doc(a,`boards/meowatt/days/${day}/speed/alice`),{name:'新名字喵',avatar:7}), true);
+await chk('speed rename + ms', updateDoc(doc(a,`boards/meowatt/days/${day}/speed/alice`),{name:'新名字喵',ms:3000}), false);
+await chk('speed rename other', updateDoc(doc(b,`boards/meowatt/days/${day}/speed/alice`),{name:'壞人喵'}), false);
+await chk('speed rename too long', updateDoc(doc(a,`boards/meowatt/days/${day}/speed/alice`),{name:'x'.repeat(17)}), false);
+await chk('count rename', updateDoc(doc(a,`boards/meowatt/days/${day}/count/alice`),{name:'新名字喵',avatar:7}), true);
+await chk('progress rename', updateDoc(doc(a,'boards/meowatt/progress/alice'),{name:'新名字喵',avatar:7}), true);
 await chk('extra field', setDoc(doc(b,'boards/meowatt/progress/bob'),{...base,cleared:1,at:serverTimestamp(),hack:1}), false);
 console.log(R.join('\n'));
 if (R.some(r => r.startsWith('FAIL'))) process.exitCode = 1;
