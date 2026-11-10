@@ -91,6 +91,26 @@ function me() {
   return { uid: auth.currentUser.uid, name: profile.name, avatar: profile.avatar };
 }
 
+// 改暱稱或頭像後，把排行榜上自己的名字、頭像一起換掉（通關進度＋最近 7 天的今日任務／今日通關）
+async function refreshBoardNames(gameId, uid, name, avatar) {
+  const refs = [doc(db, 'boards', gameId, 'progress', uid)];
+  for (let i = 0; i < 7; i++) {
+    const day = String(taipeiDay(i));
+    refs.push(doc(db, 'boards', gameId, 'days', day, 'speed', uid));
+    refs.push(doc(db, 'boards', gameId, 'days', day, 'count', uid));
+  }
+  await Promise.all(refs.map(async (ref) => {
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists() && (snap.data().name !== name || snap.data().avatar !== avatar)) {
+        await updateDoc(ref, { name, avatar });
+      }
+    } catch (e) {
+      console.warn('refreshBoardNames', ref.path, e);
+    }
+  }));
+}
+
 // ------------------------------------------------------------------ 方法
 const methods = {
   async signOut() {
@@ -98,12 +118,13 @@ const methods = {
     return true;
   },
 
-  async setProfile({ name, avatar }) {
+  async setProfile({ name, avatar, gameId }) {
     const uid = auth.currentUser.uid;
     const data = { name: String(name).slice(0, 16), avatar: avatar | 0, updatedAt: serverTimestamp() };
     if (!profile) data.createdAt = serverTimestamp();
     await setDoc(doc(db, 'players', uid), data, { merge: true });
     profile = { ...(profile || {}), name: data.name, avatar: data.avatar };
+    if (gameId) await refreshBoardNames(gameId, uid, data.name, data.avatar);
     return publicUser();
   },
 
@@ -217,6 +238,26 @@ const methods = {
       }
     }
     return { day, top, me: mine };
+  },
+
+  // 還沒登入也能問：這個成績在今天的榜上會是第幾名（speed 用毫秒，越小越好）
+  async rankOf({ gameId, kind, value }) {
+    const col = kind === 'progress'
+      ? collection(db, 'boards', gameId, 'progress')
+      : collection(db, 'boards', gameId, 'days', String(taipeiDay()), kind);
+    const field = kind === 'speed' ? 'ms' : (kind === 'progress' ? 'cleared' : 'count');
+    const better = await getCountFromServer(query(col, where(field, kind === 'speed' ? '<' : '>', value)));
+    return better.data().count + 1;
+  },
+
+  // 自己在三個榜（今天）的名次和成績：{speed: {rank, value} | null, ...}，分享用
+  async myStats({ gameId }) {
+    const out = {};
+    for (const kind of ['speed', 'progress', 'count']) {
+      const b = await methods.board({ gameId, kind, daysAgo: 0 });
+      out[kind] = b.me;
+    }
+    return out;
   },
 
   // 自己在三個榜（今天）的名次，給主選單喵咪提醒與上榜動畫比較
