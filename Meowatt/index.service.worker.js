@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1794393819|2560898';
+const CACHE_VERSION = '1794397303|2560304';
 /** @type {string} */
 const CACHE_PREFIX = '喵咪電力公司-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
