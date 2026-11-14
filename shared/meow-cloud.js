@@ -57,26 +57,69 @@ function taipeiDay(offsetDays = 0) {
   return t.getUTCFullYear() * 10000 + (t.getUTCMonth() + 1) * 100 + t.getUTCDate();
 }
 
-async function loadProfile(uid) {
-  const snap = await getDoc(doc(db, 'players', uid));
-  profile = snap.exists() ? snap.data() : null;
+// 讀玩家資料（暱稱、頭像）。網路還沒好時（Android Chrome 從背景切回、分頁被重新載入）
+// getDoc 會丟「client is offline／unavailable」，這時要重試，絕對不能當成「沒有資料」，
+// 否則遊戲會以為是第一次登入，送出隨機暱稱把雲端原本的暱稱、頭像蓋掉。
+let profileUid = '';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function loadProfile(uid, tries = 4) {
+  let err = null;
+  for (let i = 0; i < tries; i++) {
+    if (i > 0) await sleep(600 * 2 ** (i - 1));   // 0.6、1.2、2.4 秒
+    try {
+      const snap = await getDoc(doc(db, 'players', uid));
+      profile = snap.exists() ? snap.data() : null;
+      profileUid = uid;
+      return;
+    } catch (e) {
+      err = e;
+    }
+  }
+  throw err;
 }
 
-onAuthStateChanged(auth, async (u) => {
+// 確定讀到玩家資料（有或沒有）之後才讓遊戲知道已登入；讀不到就先當作還沒登入，在背景重試。
+let retryTimer = 0;
+async function onSignedIn(u) {
+  clearTimeout(retryTimer);
   try {
-    if (u) await loadProfile(u.uid);
-    else profile = null;
-    state.user = u ? { uid: u.uid } : null;
+    await loadProfile(u.uid);
+    if (auth.currentUser !== u) return;   // 讀的時候已經登出或換帳號了
+    state.user = { uid: u.uid };
     state.error = '';
   } catch (e) {
+    if (auth.currentUser !== u) return;
+    console.warn('loadProfile', e);
+    state.user = null;
     state.error = String(e && e.code || e);
-    state.user = u ? { uid: u.uid } : null;
+    retryTimer = setTimeout(() => { if (auth.currentUser === u) onSignedIn(u); }, 5000);
+  }
+}
+
+// 網路恢復、分頁切回前景時馬上再試
+function retryNow() {
+  const u = auth.currentUser;
+  if (u && !state.user) onSignedIn(u);
+}
+window.addEventListener('online', retryNow);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) retryNow(); });
+
+onAuthStateChanged(auth, async (u) => {
+  if (u) {
+    await onSignedIn(u);
+  } else {
+    clearTimeout(retryTimer);
+    profile = null;
+    profileUid = '';
+    state.user = null;
+    state.error = '';
   }
   state.ready = true;
 });
 
 function publicUser() {
-  if (!state.user) return null;
+  if (!state.user || profileUid !== state.user.uid) return null;
   return {
     uid: state.user.uid,
     name: profile ? profile.name : '',
@@ -120,8 +163,18 @@ const methods = {
 
   async setProfile({ name, avatar, gameId }) {
     const uid = auth.currentUser.uid;
+    if (profileUid !== uid) throw new Error('profile-not-loaded');
     const data = { name: String(name).slice(0, 16), avatar: avatar | 0, updatedAt: serverTimestamp() };
-    if (!profile) data.createdAt = serverTimestamp();
+    if (!profile) {
+      // 遊戲以為是第一次登入（要建立隨機暱稱）：寫入前再跟伺服器確認一次。
+      // 雲端其實已經有暱稱就不寫，改用雲端那份（狀態一變，遊戲就會拿到正確的暱稱、頭像）。
+      const snap = await getDoc(doc(db, 'players', uid));
+      if (snap.exists()) {
+        profile = snap.data();
+        throw new Error('profile-exists');
+      }
+      data.createdAt = serverTimestamp();
+    }
     await setDoc(doc(db, 'players', uid), data, { merge: true });
     profile = { ...(profile || {}), name: data.name, avatar: data.avatar };
     if (gameId) await refreshBoardNames(gameId, uid, data.name, data.avatar);
@@ -276,8 +329,7 @@ if (EMU) {
   methods._emuSignIn = async ({ sub, email }) => {
     const cred = GoogleAuthProvider.credential(JSON.stringify({ sub, email, email_verified: true }));
     await signInWithCredential(auth, cred);
-    await loadProfile(auth.currentUser.uid);
-    state.user = { uid: auth.currentUser.uid };
+    await onSignedIn(auth.currentUser);
     return publicUser();
   };
 }
@@ -359,8 +411,8 @@ function showSignIn() {
       go.textContent = '登入中…';
       try {
         await signInWithPopup(auth, new GoogleAuthProvider());
-        await loadProfile(auth.currentUser.uid);
-        state.user = { uid: auth.currentUser.uid };
+        await onSignedIn(auth.currentUser);
+        if (!state.user) throw Object.assign(new Error(state.error), { code: state.error || 'unavailable' });
         close('ok');
       } catch (e) {
         const code = String((e && e.code) || e);
