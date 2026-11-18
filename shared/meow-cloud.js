@@ -303,6 +303,43 @@ const methods = {
     return better.data().count + 1;
   },
 
+  // 明信片（喵咪旅行社）：boards/{gameId}/postcards/{uid}_{trip}，同一趟再寄一次會蓋掉舊的。回傳編號
+  async postPostcard({ gameId, trip, place, img, phrase, cleared }) {
+    const p = me();
+    const id = `${p.uid}_${trip}`;
+    await setDoc(doc(db, 'boards', gameId, 'postcards', id), {
+      uid: p.uid, name: p.name, avatar: p.avatar, trip: String(trip), place: String(place).slice(0, 20),
+      img: String(img).slice(0, 40), phrase: String(phrase || '').slice(0, 40),
+      cleared: Math.max(0, Math.min(cleared | 0, 2000)), at: serverTimestamp(),
+    });
+    return id;
+  },
+
+  // 讀一張明信片（不用登入）；cleared 換成寄件人目前的完成數
+  async getPostcard({ gameId, id }) {
+    const snap = await getDoc(doc(db, 'boards', gameId, 'postcards', String(id)));
+    if (!snap.exists()) throw new Error('not-found');
+    const d = snap.data();
+    let cleared = d.cleared | 0;
+    try {
+      const pr = await getDoc(doc(db, 'boards', gameId, 'progress', d.uid));
+      if (pr.exists()) cleared = Math.max(cleared, pr.data().cleared | 0);
+    } catch (e) { /* 讀不到就用寄出時的 */ }
+    return { ...d, id: snap.id, cleared, at: d.at ? d.at.toMillis() : 0 };
+  },
+
+  // 動態牆：最近寄出的明信片（新的在前）
+  async feed({ gameId, n }) {
+    const snap = await getDocs(query(collection(db, 'boards', gameId, 'postcards'),
+      orderBy('at', 'desc'), limit(Math.max(1, Math.min(n | 0, 60)))));
+    const out = [];
+    snap.forEach((d) => {
+      const x = d.data();
+      out.push({ ...x, id: d.id, at: x.at ? x.at.toMillis() : 0 });
+    });
+    return out;
+  },
+
   // 自己在三個榜（今天）的名次和成績：{speed: {rank, value} | null, ...}，分享用
   async myStats({ gameId }) {
     const out = {};

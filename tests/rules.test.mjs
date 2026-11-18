@@ -35,6 +35,18 @@ await chk('speed rename too long', updateDoc(doc(a,`boards/meowatt/days/${day}/s
 await chk('count rename', updateDoc(doc(a,`boards/meowatt/days/${day}/count/alice`),{name:'新名字喵',avatar:7}), true);
 await chk('progress rename', updateDoc(doc(a,'boards/meowatt/progress/alice'),{name:'新名字喵',avatar:7}), true);
 await chk('extra field', setDoc(doc(b,'boards/meowatt/progress/bob'),{...base,cleared:1,at:serverTimestamp(),hack:1}), false);
+const pc = { uid:'alice', ...base, trip:'1-3', place:'鬱金香風車', img:'s03_tulip', phrase:'風景好美！', cleared:3, at:serverTimestamp() };
+await chk('postcard create', setDoc(doc(a,'boards/travel/postcards/alice_1-3'), pc), true);
+await chk('postcard resend', setDoc(doc(a,'boards/travel/postcards/alice_1-3'), {...pc, phrase:'再寄一次'}), true);
+await chk('postcard anon read', getDoc(doc(anon,'boards/travel/postcards/alice_1-3')), true);
+await chk('postcard wrong id', setDoc(doc(a,'boards/travel/postcards/alice_9-9'), pc), false);
+await chk('postcard as other', setDoc(doc(b,'boards/travel/postcards/alice_1-3'), pc), false);
+await chk('postcard overwrite other', setDoc(doc(b,'boards/travel/postcards/alice_1-3'), {...pc, uid:'bob'}), false);
+await chk('postcard bad trip', setDoc(doc(a,'boards/travel/postcards/alice_x'), {...pc, trip:'x'}), false);
+await chk('postcard long phrase', setDoc(doc(a,'boards/travel/postcards/alice_1-4'), {...pc, trip:'1-4', phrase:'喵'.repeat(41)}), false);
+await chk('postcard extra', setDoc(doc(a,'boards/travel/postcards/alice_1-5'), {...pc, trip:'1-5', hack:1}), false);
+await chk('postcard bad game', setDoc(doc(a,'boards/xxx/postcards/alice_1-3'), pc), false);
+await chk('postcard client time', setDoc(doc(a,'boards/travel/postcards/alice_2-1'), {...pc, trip:'2-1', at:Timestamp.now()}), false);
 console.log(R.join('\n'));
 if (R.some(r => r.startsWith('FAIL'))) process.exitCode = 1;
 await env.cleanup();

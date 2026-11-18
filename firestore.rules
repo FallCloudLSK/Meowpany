@@ -7,6 +7,7 @@ rules_version = '2';
 // boards/{gameId}/progress/{uid}     ② 目前通關進度
 // boards/{gameId}/days/{day}/speed/{uid}  ① 今日關卡通關速度（day = 台灣日期 yyyymmdd）
 // boards/{gameId}/days/{day}/count/{uid}  ③ 今日通關數量
+// boards/{gameId}/postcards/{uid}_{trip}  分享的明信片（旅遊動態牆），大家都能看
 // admins/{uid}                       管理員名單（只能在主控台手動新增）
 //
 // 「今天」一律用伺服器時間換算台灣時間（UTC+8），改手機時鐘沒有用。
@@ -92,6 +93,26 @@ service cloud.firestore {
           && request.resource.data.at == request.time
           || renameOnly(uid);
         allow delete: if isMe(uid) || isAdmin();
+      }
+
+      // 明信片：編號固定是「uid_旅程」，每人每趟只有一張，再寄一次就蓋掉
+      match /postcards/{pid} {
+        allow read: if true;
+        allow create, update: if gameOk(gameId)
+          && isMe(request.resource.data.uid)
+          && (resource == null || resource.data.uid == request.auth.uid)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'avatar', 'trip', 'place', 'img', 'phrase', 'cleared', 'at'])
+          && nameOk(request.resource.data)
+          && request.resource.data.trip is string
+          && request.resource.data.trip.matches('[1-9]-[1-9]')
+          && pid == request.auth.uid + '_' + request.resource.data.trip
+          && request.resource.data.place is string && request.resource.data.place.size() <= 20
+          && request.resource.data.img is string && request.resource.data.img.size() <= 40
+          && request.resource.data.phrase is string && request.resource.data.phrase.size() <= 40
+          && request.resource.data.cleared is int
+          && request.resource.data.cleared >= 0 && request.resource.data.cleared <= 2000
+          && request.resource.data.at == request.time;
+        allow delete: if (signedIn() && resource.data.uid == request.auth.uid) || isAdmin();
       }
 
       match /days/{day} {
